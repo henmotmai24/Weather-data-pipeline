@@ -1,50 +1,54 @@
-import sys
-from pathlib import Path
-
-# Cấu hình đường dẫn gốc
-ROOT_DIR = Path(__file__).resolve().parent.parent
-sys.path.append(str(ROOT_DIR))
-
 import logging
+import subprocess
+import sys
 import time
+from pathlib import Path
 import schedule
 
-# Import các bước ETL đã viết từ trước
-from src.extractors.extract_weather import LATITUDE, LONGITUDE, extract_weather_data
-from src.loaders.load_weather import load_to_sqlite
-from src.transformers.transform_weather import transform_weather_data
+# Cấu hình log chuyên nghiệp
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - [SCHEDULER] - %(message)s"
+)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+PYTHON_BIN = sys.executable  # Tự động lấy file thực thi python trong môi trường .venv
 
 
-def run_etl_job():
-    """Hàm chạy toàn bộ pipeline ETL"""
-    logging.info("🚀 [AUTOMATION] Bắt đầu chạy Pipeline ETL tự động...")
+def job_run_pipeline():
+    """Hàm kích hoạt chạy script run_incremental.py"""
+    logging.info("⏰ Đến giờ hẹn! Đang khởi chạy Incremental Pipeline...")
+
+    script_path = ROOT_DIR / "src" / "pipelines" / "run_incremental.py"
+    if not script_path.exists():
+        script_path = ROOT_DIR / "src" / "run_incremental.py"
+
     try:
-        raw_data = extract_weather_data(LATITUDE, LONGITUDE)
-        clean_df = transform_weather_data(raw_data)
-        load_to_sqlite(clean_df, table_name="hourly_weather")
-        logging.info("✅ [AUTOMATION] Pipeline ETL đã hoàn thành thành công!\n")
-    except Exception as e:
-        logging.error(f"❌ [AUTOMATION] Pipeline gặp lỗi: {e}\n")
+        result = subprocess.run(
+            [PYTHON_BIN, str(script_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        logging.info("✅ Pipeline đã hoàn thành thành công!")
+        logging.info(f"Detail output:\n{result.stdout}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"❌ Lỗi khi chạy Pipeline: {e.stderr}")
 
 
 def main():
-    # 1. Chạy ngay 1 lần đầu tiên khi vừa bật script
-    run_etl_job()
+    logging.info("🚀 Scheduler Daemon đã bắt đầu hoạt động...")
 
-    # 2. Lập lịch tự động chạy vào 08:00 sáng mỗi ngày
-    schedule.every().day.at("08:00").do(run_etl_job)
+    # 1. Chạy ngay 1 lần đầu tiên khi Scheduler khởi động
+    job_run_pipeline()
 
-    # (Mẹo test nhanh: Bạn có thể bỏ comment dòng dưới để chạy mỗi 10 giây/lần xem thử)
-    # schedule.every(10).seconds.do(run_etl_job)
+    # 2. Lập lịch tự động chạy lại hàng ngày lúc 06:00 sáng
+    schedule.every().day.at("06:00").do(job_run_pipeline)
 
-    logging.info("⏰ Scheduler đang chạy ngầm... Nút Ctrl + C để dừng.")
+    logging.info("⏳ Đang lắng nghe lịch trình (Nhấn Ctrl + C để dừng Scheduler)...")
 
-    # Vòng lặp duy trì để lắng nghe sự kiện
     while True:
         schedule.run_pending()
-        time.sleep(1)
+        time.sleep(60)  # Thăm dò mỗi 60 giây
 
 
 if __name__ == "__main__":

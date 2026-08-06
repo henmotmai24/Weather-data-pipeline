@@ -9,7 +9,7 @@ import requests
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(ROOT_DIR))
 
-# Import danh sách thành phố em vừa tạo
+# Import danh sách thành phố  vừa tạo
 from src.config.cities import CITIES
 
 # Cấu hình hiển thị nhật ký (Log)
@@ -29,7 +29,7 @@ def fetch_weather_history(city_info: dict, start_date: str, end_date: str):
         "longitude": city_info["lon"],
         "start_date": start_date,
         "end_date": end_date,
-        # Các chỉ số chúng ta muốn lấy (như em đã đề xuất!)
+        # Các chỉ số  muốn lấy
         "hourly": "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m",
         "timezone": "UTC",
     }
