@@ -30,7 +30,7 @@ def get_max_timestamp() -> str | None:
         return None
     try:
         with sqlite3.connect(DB_PATH) as conn:
-            # Tự kiểm tra xem có bảng weather_hourly chưa
+            # Tự kiểm tra xem có bảng weather_hourly chưa?
             tables = pd.read_sql(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='weather_hourly';",
                 conn,
