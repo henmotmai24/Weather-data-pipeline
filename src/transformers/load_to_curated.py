@@ -1,25 +1,30 @@
-import glob
 import logging
+import sys
 from pathlib import Path
-import sqlite3
+
 import pandas as pd
+
+# Cấu hình đường dẫn để Python tìm thấy thư mục gốc của dự án
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(ROOT_DIR))
+
+# Trước đây file này tự mở kết nối sqlite3 và ghi vào bảng `weather_forecast`
+# bằng if_exists="replace" — HOÀN TOÀN tách biệt với bảng `weather_hourly` mà
+# run_incremental.py và dashboard sử dụng. Kết quả: dữ liệu batch nạp vào đây
+# không bao giờ hiện lên Dashboard. Giờ dùng chung writer để về đúng 1 bảng.
+from src.db.curated_writer import upsert_weather_data
 
 # Cấu hình logging chuyên nghiệp
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 # Khai báo đường dẫn động theo chuẩn Project DE1
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 CLEANSED_DIR = ROOT_DIR / "data" / "2_cleansed"
-CURATED_DIR = ROOT_DIR / "data" / "3_curated"
-DB_PATH = CURATED_DIR / "weather.db"
 
 
 def load_parquet_to_sqlite():
-    """Đọc toàn bộ file .parquet trong 2_cleansed và ghi vào SQLite Database ở 3_curated"""
-    # 1. Đảm bảo thư mục 3_curated đã tồn tại
-    CURATED_DIR.mkdir(parents=True, exist_ok=True)
-
-    # 2. Tìm tất cả các file .parquet trong thư mục 2_cleansed
+    """Đọc toàn bộ file .parquet trong 2_cleansed và UPSERT vào bảng
+    `weather_hourly` ở tầng 3_curated (dùng chung writer với run_incremental.py)."""
+    # 1. Tìm tất cả các file .parquet trong thư mục 2_cleansed
     parquet_files = list(CLEANSED_DIR.glob("*.parquet"))
 
     if not parquet_files:
@@ -30,7 +35,7 @@ def load_parquet_to_sqlite():
         f"🚀 Bắt đầu nạp dữ liệu từ {len(parquet_files)} file Parquet vào SQLite DB..."
     )
 
-    # 3. Đọc và hợp nhất (concat) tất cả file parquet thành 1 DataFrame duy nhất
+    # 2. Đọc và hợp nhất (concat) tất cả file parquet thành 1 DataFrame duy nhất
     dfs = []
     for p_file in parquet_files:
         try:
@@ -46,27 +51,12 @@ def load_parquet_to_sqlite():
 
     full_df = pd.concat(dfs, ignore_index=True)
 
-    # 4. Tự động loại bỏ các bản ghi trùng lặp (nếu có) dựa trên city_code và timestamp
-    dedup_cols = ["city_code", "timestamp"]
-    if all(col in full_df.columns for col in dedup_cols):
-        before_len = len(full_df)
-        full_df = full_df.drop_duplicates(subset=dedup_cols, keep="last")
-        after_len = len(full_df)
-        if before_len > after_len:
-            logging.info(f"🧹 Đã loại bỏ {before_len - after_len} dòng trùng lặp.")
-
-    # 5. Kết nối SQLite và ghi vào Bảng 'weather_forecast'
+    # 3. Upsert vào Curated qua writer chung — chống trùng bằng PRIMARY KEY
+    #    (city_code, timestamp) ở tầng DB, không cần tự drop_duplicates thủ công nữa.
     try:
-        conn = sqlite3.connect(DB_PATH)
-
-        # if_exists='replace': Ghi đè lại bảng dữ liệu mới nhất (hoặc chọn 'append' nếu muốn cộng dồn)
-        full_df.to_sql("weather_forecast", conn, if_exists="replace", index=False)
-
-        conn.close()
-
-        logging.info(f"✅ Đã ghi thành công {len(full_df)} dòng vào SQLite DB!")
-        logging.info(f"📍 Đường dẫn Database: {DB_PATH}")
-
+        n = upsert_weather_data(full_df)
+        logging.info(f"🎉 Hoàn thành! Đã upsert {n} dòng vào tầng Curated.")
+        logging.info(f"📍 Đường dẫn Database: {ROOT_DIR / 'data' / '3_curated' / 'weather.db'}")
     except Exception as e:
         logging.error(f"❌ Lỗi khi ghi dữ liệu vào SQLite: {e}")
 
